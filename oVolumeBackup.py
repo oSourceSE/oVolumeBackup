@@ -4,8 +4,8 @@
 # podman volume backup script written in python.                #
 #                                                               #
 # Author: Marcus Uddenhed                                       #
-# Version: 1.1.1                                                #
-# Date: 2024-04-10                                              #
+# Version: 1.2.0                                                #
+# Date: 2024-04-16                                              #
 # Requirements:                                                 #
 # pysftp for SFTP functions, only if vSendToSftp is set to yes. #
 #                                                               #
@@ -33,6 +33,9 @@ vPreOsCmd: list = [""]
 # External OS commands to execute at the end of the script.
 vPostOsCmd: list = [""]
 
+# Exclude pattern, when you want to skip volumes with a certain word in them, this is CASE sensitive.
+vExcludePattern: list = [""]
+
 #### Do not edit anything below this line ####
 
 ## Module imports.
@@ -51,7 +54,7 @@ vExportCmd: str = "podman volume export --output"
 
 ## Import pysftp only if vSendToSftp set to yes.
 if vSendToSftp == "yes":
-    import pysftp
+  import pysftp
 
 ## Define global array for volume file names.
 vGlobNameList: list = []
@@ -98,14 +101,23 @@ def funcExportVolumes() -> None:
     vNameList: list = vGetList.stdout.readlines()
     # iterate through each specified volume name.
     for vName in vNameList:
-      vSetTarFile: str = os.path.join(vBckDir, vFilePrefix + "_" + vName.decode("utf-8").strip() + "_" + funcDateString() + ".tar")
-      # Fill global array.
-      vGlobNameList.append(vSetTarFile)
-      # Execute export af volumes.
-      vCmd: str = (vExportCmd + " " + vSetTarFile + " " + vName.decode("utf-8").strip())
-      subprocess.run(vCmd, shell=True, check=True)
-      # Send info to console.
-      print("Volume exported: ", vName.decode("utf-8").strip())
+      # Set default to true for doing backup.
+      vBackup: bool = True
+      # Check to see if there is a match in exclude.
+      for vEx in vExcludePattern:
+        if vEx in str(vName):
+          # Set to false to skip backup.
+          vBackup = False
+      # Do backup if set to true.
+      if vBackup == True or len(vExcludePattern[0]) == 0:
+        vSetTarFile: str = os.path.join(vBckDir, vFilePrefix + "_" + vName.decode("utf-8").strip() + "_" + funcDateString() + ".tar")
+        # Fill global array.
+        vGlobNameList.append(vSetTarFile)
+        # Execute export af volumes.
+        vCmd: str = (vExportCmd + " " + vSetTarFile + " " + vName.decode("utf-8").strip())
+        subprocess.run(vCmd, shell=True, check=True)
+        # Send info to console.
+        print("Volume exported: ", vName.decode("utf-8").strip())
   except:
       # Send info to console
       print("Could not export one or more volumes...")
@@ -139,8 +151,8 @@ def funcSendToSftp(vFolder: str) -> None:
               sftp.put(vFile)
         # Send info to console.
         print("Uploaded: ", vFile)
-    # Send info to console.
-    print("Done sending files to SFTP server...")
+      # Send info to console.
+      print("Done sending files to SFTP server...")
   except:
     # Send info to console.
     print("Could not connect to server or upload file...")
@@ -178,17 +190,23 @@ def funcKeepBackup(vGetDays: int, vGetDir: str) -> None:
 
 ### Do the work ###
 
-## Call the pre OS command function and run only if vPreBckCmd is set to yes.
-funcExecutePreOsCmd(vPreOsCmd)
+### Function - Main
+def funcMain() -> None:
+  ## Call the pre OS command function and run only if vPreBckCmd is set to yes.
+  funcExecutePreOsCmd(vPreOsCmd)
 
-## Call the volume export function.
-funcExportVolumes()
+  ## Call the volume export function.
+  funcExportVolumes()
 
-## Call the Sftp function and upload files only if vSendToSftp is set to yes.
-funcSendToSftp(vSftpDir)
+  ## Call the Sftp function and upload files only if vSendToSftp is set to yes.
+  funcSendToSftp(vSftpDir)
 
-## Call the post OS command function and run only if vPostBckCmd is set to yes.
-funcExecutePostOsCmd(vPostOsCmd)
+  ## Call the post OS command function and run only if vPostBckCmd is set to yes.
+  funcExecutePostOsCmd(vPostOsCmd)
 
-## Call the history function to enable automatic housekeeping in the backup folder.
-funcKeepBackup(vKeepDays, vBckDir)
+  ## Call the history function to enable automatic housekeeping in the backup folder.
+  funcKeepBackup(vKeepDays, vBckDir)
+
+## Execute funcMain to Run the whole shebang....
+if __name__ == '__main__':
+    funcMain()
