@@ -4,8 +4,8 @@
 # podman volume backup script written in python.                #
 #                                                               #
 # Author: Marcus Uddenhed                                       #
-# Version: 1.2.0                                                #
-# Date: 2024-04-16                                              #
+# Version: 1.2.1                                                #
+# Date: 2024-05-01                                              #
 # Requirements:                                                 #
 # pysftp for SFTP functions, only if vSendToSftp is set to yes. #
 #                                                               #
@@ -33,7 +33,11 @@ vPreOsCmd: list = [""]
 # External OS commands to execute at the end of the script.
 vPostOsCmd: list = [""]
 
-# Exclude pattern, when you want to skip volumes with a certain word in them, this is CASE sensitive.
+# If you want to exclude or include volumes in backup you can use these two options.
+# If both are empty it will do a backup of every volumes that exists.
+# The include takes precedence over exclude pattern, so if you add to both the exclude
+# lookup will be ignored, the words are CASE sensitive so "data" is not equal to "Data" and so on.
+vIncludePattern: list = [""]
 vExcludePattern: list = [""]
 
 #### Do not edit anything below this line ####
@@ -53,7 +57,7 @@ vExportCmd: str = "podman volume export --output"
 #### Script Action
 
 ## Import pysftp only if vSendToSftp set to yes.
-if vSendToSftp == "yes":
+if vSendToSftp.lower() == "yes":
   import pysftp
 
 ## Define global array for volume file names.
@@ -99,28 +103,56 @@ def funcExportVolumes() -> None:
     vGetList: list = subprocess.Popen(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # Create an array with the names.
     vNameList: list = vGetList.stdout.readlines()
-    # iterate through each specified volume name.
+    # Iterate through volumes.
     for vName in vNameList:
-      # Set default to true for doing backup.
-      vBackup: bool = True
-      # Check to see if there is a match in exclude.
-      for vEx in vExcludePattern:
-        if vEx in str(vName):
-          # Set to false to skip backup.
-          vBackup = False
-      # Do backup if set to true.
-      if vBackup == True or len(vExcludePattern[0]) == 0:
-        vSetTarFile: str = os.path.join(vBckDir, vFilePrefix + "_" + vName.decode("utf-8").strip() + "_" + funcDateString() + ".tar")
-        # Fill global array.
-        vGlobNameList.append(vSetTarFile)
-        # Execute export af volumes.
-        vCmd: str = (vExportCmd + " " + vSetTarFile + " " + vName.decode("utf-8").strip())
-        subprocess.run(vCmd, shell=True, check=True)
-        # Send info to console.
+      # Set to 0 as default(1 = Backup, 2 = Skip).
+      vBackup: int = 0
+      # Check to see if include or exclude is used.
+      if (len(vIncludePattern[0]) == 0) and (len(vExcludePattern[0]) == 0):
+        # Set to 1.
+        vBackup = 1
+      else:
+        # Check if include is used.
+        if (len(vIncludePattern[0]) != 0):
+          # Iterate through include pattern.
+          for vInc in vIncludePattern:
+            # Check for match.
+            if vInc in str(vName):
+              # Set to 1.
+              vBackup = 1
+        # Check if exclude is used.
+        elif (len(vExcludePattern[0]) != 0):
+          # Iterate through exclude pattern.
+          for vEx in vExcludePattern:
+            # Check for match.
+            if vEx in str(vName):
+              # Set to 2.
+              vBackup = 2
+            else:
+              # Only change if not set to 2.
+              if vBackup != 2:
+                # Set to 1.
+                vBackup = 1
+      # Do backup if equal to 1.
+      if vBackup == 1:
+        funcDoBackup(vName)
         print("Volume exported: ", vName.decode("utf-8").strip())
   except:
-      # Send info to console
-      print("Could not export one or more volumes...")
+    # Send info to console.
+    print("Could not export one or more volumes...")
+
+## Define backup function
+def funcDoBackup(vInputName) -> None:
+  # Build filename.
+  vSetTarFile: str = os.path.join(vBckDir, vFilePrefix + "_" + vInputName.decode("utf-8").strip() + "_" + funcDateString() + ".tar")
+  # Fill global array for usage later if vSendToSftp set to yes.
+  if vSendToSftp.lower() == "yes":
+    vGlobNameList.append(vSetTarFile)
+  # Execute export af volumes.
+  vCmd: str = (vExportCmd + " " + vSetTarFile + " " + vInputName.decode("utf-8").strip())
+  subprocess.run(vCmd, shell=True, check=True)
+  # Return info.
+  return None
 
 ## Define function send to SFTP.
 def funcSendToSftp(vFolder: str) -> None:
