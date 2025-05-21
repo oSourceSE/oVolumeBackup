@@ -4,8 +4,8 @@
 # podman volume backup script written in python.                #
 #                                                               #
 # Author: Marcus Uddenhed                                       #
-# Version: 1.2.1                                                #
-# Date: 2024-05-01                                              #
+# Version: 1.2.2                                                #
+# Date: 2025-05-21                                              #
 # Requirements:                                                 #
 # pysftp for SFTP functions, only if vSendToSftp is set to yes. #
 #                                                               #
@@ -15,7 +15,7 @@
 vBckDir: str = ""                      # Backup folder to use during creation of volume exports and to store files locally.
 vFilePrefix: str = ""                  # Name prefix of files, _date and .tar is added at the end, ex. 'prefix_volumename_date.tar'.
 vKeepBackup: str = "no"                # Keep local backup files after sent to SFTP server, if no than nothing is kept locally.(no/yes)
-vKeepDays: int = "20"                  # Number of days to keep local files before pruning the backup directory, relies on vKeepBackup.
+vKeepDays: str = "20"                  # Number of days to keep local files before pruning the backup directory, relies on vKeepBackup.
 vSendToSftp: str = "no"                # Should we send the files to a Sftp server.(no/yes)
 vSftpUser: str = ""                    # User for the remote server, used both with password or key file.
 vSftpPass: str = ""                    # Password for the remote server.
@@ -23,22 +23,22 @@ vSftpUseKey: str = "no"                # Use key file as authenticator against r
 vSftpKeyFile: str = ""                 # Full path and key to use when connecting via key file instead of username/password.
 vSftpDir: str = ""                     # Destination folder on remote server.
 vSftpHost: str = ""                    # Remote server address.
-vSftpPort: int = "22"                  # Remote server port.
+vSftpPort: str = "22"                  # Remote server port.
 vPreBckCmd: str = "no"                 # Run extra OS specific commands before backup.(no/yes)
 vPostBckCmd: str = "no"                # Run extra OS specific commands after backup.(no/yes)
 
 # External OS commands to execute before continuing with the rest of the script.
-vPreOsCmd: list = [""]
+vPreOsCmd: list[str] = [""]
 
 # External OS commands to execute at the end of the script.
-vPostOsCmd: list = [""]
+vPostOsCmd: list[str] = [""]
 
 # If you want to exclude or include volumes in backup you can use these two options.
 # If both are empty it will do a backup of every volumes that exists.
 # The include takes precedence over exclude pattern, so if you add to both the exclude
 # lookup will be ignored, the words are CASE sensitive so "data" is not equal to "Data" and so on.
-vIncludePattern: list = [""]
-vExcludePattern: list = [""]
+vIncludePattern: list[str] = [""]
+vExcludePattern: list[str] = [""]
 
 #### Do not edit anything below this line ####
 
@@ -47,6 +47,10 @@ from datetime import datetime
 from time import time
 import subprocess
 import os
+
+# Convert to int to keep it tidy in user parameters.
+vKeepDaysInt = int(vKeepDays)
+vSftpPortInt = int(vSftpPort)
 
 # Volume list command
 vListCmd: str = "podman volume list --format {{.Name}}"
@@ -61,15 +65,15 @@ if vSendToSftp.lower() == "yes":
   import pysftp
 
 ## Define global array for volume file names.
-vGlobNameList: list = []
+vGlobNameList: list[str] = []
 
 ## Get current date
-def funcDateString() -> datetime:
+def funcDateString() -> str:
   # Returns the today string year, month, day.
   return datetime.now().strftime("%Y%m%d")
 
 ## Define function for Pre OS commands.
-def funcExecutePreOsCmd(vPreOsCmd: list) -> None:
+def funcExecutePreOsCmd(vPreOsCmd: list[str]) -> None:
   try:
     if vPreBckCmd.casefold() == "yes":
       # iterate through each specified command.
@@ -82,7 +86,7 @@ def funcExecutePreOsCmd(vPreOsCmd: list) -> None:
     print("Could not execute OS command...")
 
 ## Define function for Pre OS commands.
-def funcExecutePostOsCmd(vPostOsCmd: list) -> None:
+def funcExecutePostOsCmd(vPostOsCmd: list[str]) -> None:
   try:
     if vPostBckCmd.casefold() == "yes":
       # iterate through each specified command.
@@ -100,9 +104,9 @@ def funcExportVolumes() -> None:
     # Mark vGlobNameList global
     global vGlobNameList
     # Get volume names.
-    vGetList: list = subprocess.Popen(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    vGetList: list[str] = subprocess.Popen(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # type: ignore
     # Create an array with the names.
-    vNameList: list = vGetList.stdout.readlines()
+    vNameList: list[str] = vGetList.stdout.readlines() # type: ignore
     # Iterate through volumes.
     for vName in vNameList:
       # Set to 0 as default(1 = Backup, 2 = Skip).
@@ -136,7 +140,9 @@ def funcExportVolumes() -> None:
       # Do backup if equal to 1.
       if vBackup == 1:
         funcDoBackup(vName)
-        print("Volume exported: ", vName.decode("utf-8").strip())
+        # Send to output.
+        vEncName: str = str(vName, encoding='utf-8') # type: ignore
+        print("Volume exported: ", vEncName.strip())
   except:
     # Send info to console.
     print("Could not export one or more volumes...")
@@ -159,7 +165,7 @@ def funcSendToSftp(vFolder: str) -> None:
   try:
     if vSendToSftp.casefold() == "yes":
       # int literal to int...
-      vPort: int = int(vSftpPort)
+      vPort: int = int(vSftpPortInt)
       # Send info to console.
       print("Sending files to SFTP server...")
       # Iterate through file name list and send files.
@@ -169,14 +175,14 @@ def funcSendToSftp(vFolder: str) -> None:
         # Check connection parameters and build connection string.
         if vSftpUseKey.lower() == "yes":
           # Connect to SFTP with key fil and upload file.
-          with pysftp.Connection(host=vSftpHost, port=vPort, username=vSftpUser, private_key=vSftpKeyFile) as sftp:
+          with pysftp.Connection(host=vSftpHost, port=vPort, username=vSftpUser, private_key=vSftpKeyFile) as sftp: # type: ignore
             # Change directory.
               with sftp.cd(vFolder):
                 # Upload file
                 sftp.put(vFile)
         elif vSftpUseKey.lower() == "no":
           # Connect to SFTP with username/password and upload file.
-          with pysftp.Connection(host=vSftpHost, port=vPort, username=vSftpUser, password=vSftpPass) as sftp:
+          with pysftp.Connection(host=vSftpHost, port=vPort, username=vSftpUser, password=vSftpPass) as sftp: # type: ignore
             # Change directory.
             with sftp.cd(vFolder):
               # Upload file
@@ -198,7 +204,7 @@ def funcKeepBackup(vGetDays: int, vGetDir: str) -> None:
       # Send info to console.
       print("Pruning backup folder, keeping", vIntDays, "days...")
       # Set today as current day.
-      vTimeNow: int = time()
+      vTimeNow: int = int(time())
       # Remove files based on days to keep.
       for fname in os.listdir(vGetDir):
         if fname.startswith(vFilePrefix):
@@ -237,7 +243,7 @@ def funcMain() -> None:
   funcExecutePostOsCmd(vPostOsCmd)
 
   ## Call the history function to enable automatic housekeeping in the backup folder.
-  funcKeepBackup(vKeepDays, vBckDir)
+  funcKeepBackup(vKeepDaysInt, vBckDir)
 
 ## Execute funcMain to Run the whole shebang....
 if __name__ == '__main__':
