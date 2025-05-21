@@ -4,7 +4,7 @@ Volume backup script for podman written in python.
 ### Versions
 The script has been validated against the following versions of podman and python on Ubuntu.
 
-**Podman:** 4.9.3 / **Python:** 3.12.3
+**Podman:** 5.0.3 / **Python:** 3.12.7
 
 ### More...
 
