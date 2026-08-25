@@ -1,15 +1,15 @@
 #!/usr/bin/python3
 
-#################################################################
-# podman volume backup script written in python.                #
-#                                                               #
-# Author: Marcus Uddenhed                                       #
-# Version: 1.2.2                                                #
-# Date: 2025-05-21                                              #
-# Requirements:                                                 #
-# pysftp for SFTP functions, only if vSendToSftp is set to yes. #
-#                                                               #
-#################################################################
+###################################################################
+# podman volume backup script written in python.                  #
+#                                                                 #
+# Author: Marcus Uddenhed                                         #
+# Version: 1.2.3                                                  #
+# Date: 2026-08-25                                                #
+# Requirements:                                                   #
+# paramiko for SFTP functions, only if vSendToSftp is set to yes. #
+#                                                                 #
+###################################################################
 
 ## Global variables.
 vBckDir: str = ""                      # Backup folder to use during creation of volume exports and to store files locally.
@@ -35,8 +35,8 @@ vPostOsCmd: list[str] = [""]
 
 # If you want to exclude or include volumes in backup you can use these two options.
 # If both are empty it will do a backup of every volumes that exists.
-# The include takes precedence over exclude pattern, so if you add to both the exclude
-# lookup will be ignored, the words are CASE sensitive so "data" is not equal to "Data" and so on.
+# The include takes precedence over exclude pattern, so if you add to both the exclude lookup
+# will be ignored, the words are CASE sensitive so "data" is not equal to "Data" and so on.
 vIncludePattern: list[str] = [""]
 vExcludePattern: list[str] = [""]
 
@@ -62,7 +62,7 @@ vExportCmd: str = "podman volume export --output"
 
 ## Import pysftp only if vSendToSftp set to yes.
 if vSendToSftp.lower() == "yes":
-  import pysftp
+  import paramiko
 
 ## Define global array for volume file names.
 vGlobNameList: list[str] = []
@@ -78,7 +78,7 @@ def funcExecutePreOsCmd(vPreOsCmd: list[str]) -> None:
     if vPreBckCmd.casefold() == "yes":
       # iterate through each specified command.
       for vExecute in vPreOsCmd:
-        subprocess.run(vExecute, shell=True, check=True)
+        _ = subprocess.run(vExecute, shell=True, check=True)
       # Send info to console.
       print("OS commands has been executed...")
   except:
@@ -91,7 +91,7 @@ def funcExecutePostOsCmd(vPostOsCmd: list[str]) -> None:
     if vPostBckCmd.casefold() == "yes":
       # iterate through each specified command.
       for vExecute in vPostOsCmd:
-        subprocess.run(vExecute, shell=True, check=True)
+        _ = subprocess.run(vExecute, shell=True, check=True)
       # Send info to console.
       print("OS commands has been executed...")
   except:
@@ -104,9 +104,11 @@ def funcExportVolumes() -> None:
     # Mark vGlobNameList global
     global vGlobNameList
     # Get volume names.
-    vGetList: list[str] = subprocess.Popen(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # type: ignore
+    #vGetList: Popen[bytes] = subprocess.Popen(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    vGetList = subprocess.run(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # Create an array with the names.
-    vNameList: list[str] = vGetList.stdout.readlines() # type: ignore
+    vNameList: list[str] = vGetList.stdout.decode('utf-8')[:-2].split('\n')
+
     # Iterate through volumes.
     for vName in vNameList:
       # Set to 0 as default(1 = Backup, 2 = Skip).
@@ -139,61 +141,101 @@ def funcExportVolumes() -> None:
                 vBackup = 1
       # Do backup if equal to 1.
       if vBackup == 1:
-        funcDoBackup(vName)
+        funcDoBackup(vName.encode('utf-8'))
         # Send to output.
-        vEncName: str = str(vName, encoding='utf-8') # type: ignore
-        print("Volume exported: ", vEncName.strip())
+        vEncName: str = vName
+        print("Volume exported: ", vEncName)
   except:
     # Send info to console.
     print("Could not export one or more volumes...")
 
 ## Define backup function
-def funcDoBackup(vInputName) -> None:
+def funcDoBackup(vInputName: bytes) -> None:
   # Build filename.
-  vSetTarFile: str = os.path.join(vBckDir, vFilePrefix + "_" + vInputName.decode("utf-8").strip() + "_" + funcDateString() + ".tar")
+  vSetTarFileName: str = vFilePrefix + "_" + vInputName.decode("utf-8").strip() + "_" + funcDateString() + ".tar"
+  vSetTarFileFullPath: str = os.path.join(vBckDir, vSetTarFileName)
   # Fill global array for usage later if vSendToSftp set to yes.
   if vSendToSftp.lower() == "yes":
-    vGlobNameList.append(vSetTarFile)
-  # Execute export af volumes.
-  vCmd: str = (vExportCmd + " " + vSetTarFile + " " + vInputName.decode("utf-8").strip())
-  subprocess.run(vCmd, shell=True, check=True)
+    vGlobNameList.append(vSetTarFileName)
+  # Execute export of volumes.
+  vCmd: str = (vExportCmd + " " + vSetTarFileFullPath + " " + vInputName.decode("utf-8").strip())
+  _ = subprocess.run(vCmd, shell=True, check=True)
   # Return info.
   return None
 
-## Define function send to SFTP.
-def funcSendToSftp(vFolder: str) -> None:
+## Define function - Connect to SFTP.
+def funcSftpConnect() -> None:
   try:
-    if vSendToSftp.casefold() == "yes":
-      # int literal to int...
-      vPort: int = int(vSftpPortInt)
-      # Send info to console.
-      print("Sending files to SFTP server...")
-      # Iterate through file name list and send files.
-      for vFile in vGlobNameList:
-        # Send info to console.
-        print("Uploading:", vFile)
-        # Check connection parameters and build connection string.
-        if vSftpUseKey.lower() == "yes":
-          # Connect to SFTP with key fil and upload file.
-          with pysftp.Connection(host=vSftpHost, port=vPort, username=vSftpUser, private_key=vSftpKeyFile) as sftp: # type: ignore
-            # Change directory.
-              with sftp.cd(vFolder):
-                # Upload file
-                sftp.put(vFile)
-        elif vSftpUseKey.lower() == "no":
-          # Connect to SFTP with username/password and upload file.
-          with pysftp.Connection(host=vSftpHost, port=vPort, username=vSftpUser, password=vSftpPass) as sftp: # type: ignore
-            # Change directory.
-            with sftp.cd(vFolder):
-              # Upload file
-              sftp.put(vFile)
-        # Send info to console.
-        print("Uploaded: ", vFile)
-      # Send info to console.
-      print("Done sending files to SFTP server...")
-  except:
+    global vScpClient
+    vScpClient = paramiko.SSHClient()
+    vScpClient.load_system_host_keys()
+    vInputPortInt: int = int(vSftpPort)
+    # Check if to ask for username & password or to use keyfile.
+    if vSftpUseKey.lower() == "no":
+      print('Entering Username & Password for remote server...')
+      vScpClient.connect(vSftpHost, port=vInputPortInt, username=vSftpUser, password=vSftpPass)
+    elif vSftpUseKey.lower() == "yes":
+      # Get KeyFile.
+      vKeyFile = paramiko.PKey.from_path(vSftpKeyFile)
+      # Check if username is entered, if yes combine with key file, else use only key file.
+      if vSftpUser != "":
+        print('Using Username & KeyFile to connect to remote server...')
+        vScpClient.connect(vSftpHost, port=vInputPortInt, username=vSftpUser, pkey=vKeyFile, look_for_keys=False)
+      else:
+        print('Using KeyFile to connect to remote server...')
+        vScpClient.connect(vSftpHost, port=vInputPortInt, pkey=vKeyFile, look_for_keys=False)
+    # Open connection
+    global vScpConn
+    vScpConn = vScpClient.open_sftp()
+    print('Connected to SFTP...')
+  except Exception as vErr:
+    # Send info to console and exit.
+    print('Cannot connect to remote server, exiting...')
+    print(vErr)
+    exit(1)
+
+## Define function - Send to SFTP.
+def funcSendToSftp() -> None: #vShowMsg: str) -> None:
+  try:
+    # Open SFTP connection.
+    funcSftpConnect()
     # Send info to console.
-    print("Could not connect to server or upload file...")
+    print("Sending files to SFTP server...")
+    # Iterate through file name list and send files.
+    for vFile in vGlobNameList:
+      # Send info to console.
+      print("Uploading:", vFile)
+      # Change directory on server.
+      vScpConn.chdir(vSftpDir)
+      # Build local path
+      vSetFileFullPath: str = os.path.join(vBckDir, vFile)
+      # Send file to server.
+      _ = vScpConn.put(vSetFileFullPath, vFile)
+      # Send info to console.
+      print("Uploaded: ", vFile)
+    # Send info to console.
+    print("Done sending files to SFTP server...")
+    # Close SFTP connection.
+    funcSftpClose()
+  except Exception as vErr:
+    print('Could not send file...')
+    # Close SFTP Connection.
+    funcSftpClose()
+    # Send info to console and exit.
+    print(vErr)
+    exit(1)
+
+## Define function - Close SFTP connection.
+def funcSftpClose() -> None:
+  try:
+    # Close active session if any.
+    print("Closing remote session...")
+    vScpConn.close()
+    print("Remote session closed...")
+  except Exception as vErr:
+    # Send info to console and exit.
+    print(vErr)
+    exit(1)
 
 ## Define history function.
 def funcKeepBackup(vGetDays: int, vGetDir: str) -> None:
@@ -237,7 +279,7 @@ def funcMain() -> None:
   funcExportVolumes()
 
   ## Call the Sftp function and upload files only if vSendToSftp is set to yes.
-  funcSendToSftp(vSftpDir)
+  funcSendToSftp()
 
   ## Call the post OS command function and run only if vPostBckCmd is set to yes.
   funcExecutePostOsCmd(vPostOsCmd)
