@@ -4,28 +4,29 @@
 # podman volume backup script written in python.                  #
 #                                                                 #
 # Author: Marcus Uddenhed                                         #
-# Version: 1.2.3                                                  #
-# Date: 2026-08-25                                                #
+# Version: 1.2.4                                                  #
+# Date: 2026-09-05                                                #
 # Requirements:                                                   #
 # paramiko for SFTP functions, only if vSendToSftp is set to yes. #
 #                                                                 #
 ###################################################################
 
 ## Global variables.
-vBckDir: str = ""                      # Backup folder to use during creation of volume exports and to store files locally.
-vFilePrefix: str = ""                  # Name prefix of files, _date and .tar is added at the end, ex. 'prefix_volumename_date.tar'.
-vKeepBackup: str = "no"                # Keep local backup files after sent to SFTP server, if no than nothing is kept locally.(no/yes)
-vKeepDays: str = "20"                  # Number of days to keep local files before pruning the backup directory, relies on vKeepBackup.
-vSendToSftp: str = "no"                # Should we send the files to a Sftp server.(no/yes)
-vSftpUser: str = ""                    # User for the remote server, used both with password or key file.
-vSftpPass: str = ""                    # Password for the remote server.
-vSftpUseKey: str = "no"                # Use key file as authenticator against remote server for SFTP.
-vSftpKeyFile: str = ""                 # Full path and key to use when connecting via key file instead of username/password.
-vSftpDir: str = ""                     # Destination folder on remote server.
-vSftpHost: str = ""                    # Remote server address.
-vSftpPort: str = "22"                  # Remote server port.
-vPreBckCmd: str = "no"                 # Run extra OS specific commands before backup.(no/yes)
-vPostBckCmd: str = "no"                # Run extra OS specific commands after backup.(no/yes)
+vBckDir: str = ""                     # Backup folder to use during creation of volume exports and to store files locally.
+vFilePrefix: str = ""                 # Name prefix of files, _date and .tar is added at the end, ex. 'prefix_volumename_date.tar'.
+vKeepBackup: str = "no"               # Keep local backup files after sent to SFTP server, if no than nothing is kept locally.(no/yes)
+vKeepDays: str = "20"                 # Number of days to keep local files before pruning the backup directory, relies on vKeepBackup.
+vSendToSftp: str = "no"               # Should we send the files to a Sftp server.(no/yes)
+vSftpUser: str = ""                   # User for the remote server, used both with password or key file.
+vSftpPass: str = ""                   # Password for the remote server.
+vSftpUseKey: str = "no"               # Use key file as authenticator against remote server for SFTP.
+vSftpKeyFile: str = ""                # Full path and key to use when connecting via key file instead of username/password.
+vSftpDir: str = ""                    # Destination folder on remote server.
+vSftpHost: str = ""                   # Remote server address.
+vSftpPort: str = "22"                 # Remote server port.
+vSftpTimeout: str = "0"               # Set SFTP timeout before failing, 0 sets it to None.
+vPreBckCmd: str = "no"                # Run extra OS specific commands before backup.(no/yes)
+vPostBckCmd: str = "no"               # Run extra OS specific commands after backup.(no/yes)
 
 # External OS commands to execute before continuing with the rest of the script.
 vPreOsCmd: list[str] = [""]
@@ -104,11 +105,9 @@ def funcExportVolumes() -> None:
     # Mark vGlobNameList global
     global vGlobNameList
     # Get volume names.
-    #vGetList: Popen[bytes] = subprocess.Popen(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     vGetList = subprocess.run(vListCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # Create an array with the names.
-    vNameList: list[str] = vGetList.stdout.decode('utf-8')[:-2].split('\n')
-
+    vNameList: list[str] = vGetList.stdout.decode('utf-8')[:-1].split('\n')
     # Iterate through volumes.
     for vName in vNameList:
       # Set to 0 as default(1 = Backup, 2 = Skip).
@@ -166,24 +165,34 @@ def funcDoBackup(vInputName: bytes) -> None:
 ## Define function - Connect to SFTP.
 def funcSftpConnect() -> None:
   try:
+    # Initalize variables.
     global vScpClient
     vScpClient = paramiko.SSHClient()
     vScpClient.load_system_host_keys()
-    vInputPortInt: int = int(vSftpPort)
+    vSetTimeout: int = int(vSftpTimeout)
     # Check if to ask for username & password or to use keyfile.
     if vSftpUseKey.lower() == "no":
       print('Entering Username & Password for remote server...')
-      vScpClient.connect(vSftpHost, port=vInputPortInt, username=vSftpUser, password=vSftpPass)
+      if vSetTimeout == 0:
+        vScpClient.connect(vSftpHost, port=vSftpPortInt, username=vSftpUser, password=vSftpPass, timeout=None)
+      else:
+        vScpClient.connect(vSftpHost, port=vSftpPortInt, username=vSftpUser, password=vSftpPass, timeout=vSetTimeout)
     elif vSftpUseKey.lower() == "yes":
       # Get KeyFile.
       vKeyFile = paramiko.PKey.from_path(vSftpKeyFile)
       # Check if username is entered, if yes combine with key file, else use only key file.
       if vSftpUser != "":
         print('Using Username & KeyFile to connect to remote server...')
-        vScpClient.connect(vSftpHost, port=vInputPortInt, username=vSftpUser, pkey=vKeyFile, look_for_keys=False)
+        if vSetTimeout == 0:
+          vScpClient.connect(vSftpHost, port=vSftpPortInt, username=vSftpUser, pkey=vKeyFile, look_for_keys=False, timeout=None)
+        else:
+          vScpClient.connect(vSftpHost, port=vSftpPortInt, username=vSftpUser, pkey=vKeyFile, look_for_keys=False, timeout=vSetTimeout)
       else:
         print('Using KeyFile to connect to remote server...')
-        vScpClient.connect(vSftpHost, port=vInputPortInt, pkey=vKeyFile, look_for_keys=False)
+        if vSetTimeout == 0:
+          vScpClient.connect(vSftpHost, port=vSftpPortInt, pkey=vKeyFile, look_for_keys=False, timeout=None)
+        else:
+          vScpClient.connect(vSftpHost, port=vSftpPortInt, pkey=vKeyFile, look_for_keys=False, timeout=vSetTimeout)
     # Open connection
     global vScpConn
     vScpConn = vScpClient.open_sftp()
@@ -195,7 +204,7 @@ def funcSftpConnect() -> None:
     exit(1)
 
 ## Define function - Send to SFTP.
-def funcSendToSftp() -> None: #vShowMsg: str) -> None:
+def funcSendToSftp() -> None:
   try:
     # Open SFTP connection.
     funcSftpConnect()
@@ -279,7 +288,8 @@ def funcMain() -> None:
   funcExportVolumes()
 
   ## Call the Sftp function and upload files only if vSendToSftp is set to yes.
-  funcSendToSftp()
+  if vSendToSftp.lower() == "yes":
+    funcSendToSftp()
 
   ## Call the post OS command function and run only if vPostBckCmd is set to yes.
   funcExecutePostOsCmd(vPostOsCmd)
